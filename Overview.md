@@ -1,287 +1,255 @@
-# Updated Hardware Design Document
+Perfect — **one visible USB (charging only)** is the cleanest/strongest baton mechanically, and it keeps the electrical design dead simple.
 
-## Motion-Reactive Throwable LED Baton
-
-**Platform:** RP2040 (Raspberry Pi Pico form factor)
-**IMU:** ST **LSM6DSR** over **SPI**
-**LEDs:** ~36× **WS2812** (strip inside ~2 ft diffuser tube)
-**Power:** **Single salvaged vape Li-ion cell (1S)**, “safe + simple”
+Here’s the **hardware-locked update** of the design doc with that decision baked in, including a concrete mid-body layout for **30 mm ID** (and an easy fallback to 38 mm).
 
 ---
 
-## 1) Goals and constraints
+# Hardware Design Document v2.1
 
-### Goals
+## RP2040 + LSM6DSR (SPI) + 36× WS2812
 
-* Durable baton you can toss; IMU detects motion/impact/free-fall and drives LED effects.
-* Hardware that’s **solderable by hand** (prefer through-hole / big pads).
-* Avoid complex battery pack management: **single cell only**.
+### Single visible USB for charging (programming requires opening baton)
 
-### Constraints
+## 1) Summary
 
-* Battery rail is **3.0–4.2 V**, with big current spikes from LEDs.
-* WS2812 worst-case current is huge; we will enforce **firmware brightness limits**.
-* Mechanical shocks require: strain relief, robust wiring, minimal connectors.
+A 2-ft throwable LED baton using:
 
----
+* **Raspberry Pi Pico (RP2040)** for control + WS2812 via **PIO**
+* **LSM6DSR** IMU on **SPI**
+* **36× WS2812** LEDs on a strip inside a diffused tube
+* **Single 1S vape Li-ion cell** with **known 1S charger+protection module**
+* Only external port: **charger USB**
+* Pico USB is internal; open baton to reflash
 
-## 2) Finalized architecture
+Primary design priorities:
 
-### Power rails (two-rail system)
-
-* **Rail A: LED power (VBAT)**
-  Battery (after protection) directly powers the WS2812 strip.
-* **Rail B: Logic power (3.3 V)**
-  Battery → **3.3 V buck/boost regulator** → RP2040 + LSM6DSR breakout.
-
-This is the simplest design that prevents MCU brownouts caused by LED sag.
+* **Battery safety & simplicity**
+* **No random resets** from LED current spikes
+* **Mechanical robustness** for throwing
+* **Hand-solderable modules** (through-hole headers / large pads)
 
 ---
 
-## 3) Hardware selections (nailed down)
+## 2) Mechanical envelope and layout
 
-### 3.1 Controller board: RP2040
+### Tube size targets
 
-**Recommended:** **Raspberry Pi Pico** (or compatible) + **0.1" headers you solder yourself**
-Why:
+* **Ideal:** 30 mm inner diameter (ID)
+* **Easy mode:** 38 mm ID (more padding, easier module selection)
 
-* Through-hole header soldering is easy.
-* Tons of proven examples for **WS2812 via PIO**.
-* Easy debug/program via USB.
+30 mm works if we keep the middle package low-profile and avoid tall stacks.
 
-Notes:
+### Overall physical layout
 
-* You can mount it on a small perfboard or custom carrier with screw/zip-tie strain relief.
+* **LED strip** runs nearly full length
+* **Electronics “center sled”** located at the baton midpoint (center of mass)
+* **Single charging USB window** on the tube at the center (grip area)
+* Ends are sealed with foam end caps; electronics are not at the ends
 
----
+### Center sled concept (recommended)
 
-### 3.2 IMU: LSM6DSR over SPI
+A rigid internal carrier ~**140–180 mm long** that holds:
 
-**Recommended:** LSM6DSR breakout that includes:
+* battery (centered)
+* charger/protection module (USB aligned to window)
+* 3.3 V buck/boost module
+* Pico (internal-only USB)
+* IMU breakout
+* bulk capacitor + series resistor
 
-* **0.1" header holes**
-* **3.3 V-compatible IO**
-* Optional onboard regulator/level shifting is fine, but not required if it’s a 3.3 V breakout.
+**Sled materials (pick one):**
 
-SPI is the right call here: robust signal integrity, higher rates, less I²C fuss.
+* 3D printed sled (best packaging control)
+* FR4 strip / acrylic strip (simple, stiff)
+* perfboard only as a mounting plate (avoid tall component stacks)
 
----
-
-### 3.3 LED strip: WS2812
-
-* 36 LEDs total is solid for a 2 ft baton (looks great with diffusion).
-* Recommended density: **60 LED/m** and use ~0.6 m (or cut to length).
-* Plan for **power injection at the start**; consider a second injection at the far end if you see gradient.
-
----
-
-### 3.4 Battery charging + protection
-
-For “safe + simple”, don’t rely on mystery vape charge PCBs unless you’ve identified them well.
-
-**Recommended approach:** Use a known **1S Li-ion charger module with protection** (common TP4056+protection style is fine).
-
-* USB in, BAT+/BAT-, OUT+/OUT- (if present) makes wiring clean.
-* Include a **physical power switch** on the protected output.
-
-If your charger module does **not** have “load sharing/power path”, that’s still okay for this project (you can avoid using it while charging).
+**Retention:** foam cradle + 2–3 zip ties or screws → sled cannot rattle.
 
 ---
 
-### 3.5 3.3 V buck/boost regulator module (big pads / hand solderable)
+## 3) Electrical architecture
 
-Pick a **buck/boost** (not just an LDO) so the RP2040 stays stable as the cell drains.
+### 3.1 Rails
 
-**Target specs**
+* **VBAT (protected):** battery voltage after protection, ~3.0–4.2 V
 
-* Input: **2.7–4.5 V** (or wider)
-* Output: **3.3 V**
-* Continuous: **≥300 mA** (more is fine)
-* Prefer a module with **through-hole pins / large pads**.
+  * Powers WS2812 strip directly
+  * Feeds buck/boost regulator
+* **3.3 V:** regulated logic rail for Pico + IMU
 
-This is the single most important “stability” part besides capacitors.
+### 3.2 Star power topology (must-follow)
 
----
+At the **protected battery output**, create a star point:
 
-## 4) Wiring plan (pin-level)
+* Branch A: **VBAT → LED strip V+**
+* Branch B: **VBAT → 3.3V buck/boost → Pico + IMU**
 
-### 4.1 Proposed Pico pin usage
+Ground returns also star back to the same point:
 
-You can change pins later, but it’s helpful to commit now.
+* LED ground return does **not** share thin traces/wires with logic ground.
 
-#### WS2812 (PIO output)
-
-* **LED_DATA:** Pico **GP0** (PIO-friendly, simple)
-
-#### SPI to LSM6DSR (SPI0 suggested)
-
-* **SCK:**  GP18
-* **MOSI:** GP19
-* **MISO:** GP16
-* **CS:**   GP17  (any GPIO works as CS)
-
-(These map cleanly to SPI0 on many Pico examples.)
-
-#### Optional battery sense (future-proof)
-
-* **VBAT_SENSE:** GP26 / ADC0 via resistor divider (optional; can leave unpopulated)
+This is your main defense against resets/flicker.
 
 ---
 
-### 4.2 Power wiring and grounding (must-follow)
+## 4) Modules and parts (hand-solderable)
 
-Create a **star point** at the protected battery output:
+### 4.1 MCU
 
-* Branch 1 (high current): **VBAT → LED +**
-* Branch 2 (clean): **VBAT → buck/boost → 3.3V → Pico + IMU**
+* **Raspberry Pi Pico**
 
-Grounds return separately to the star point:
+  * Solder on 0.1" headers (through-hole)
+  * Mount flat to sled (minimize flex)
 
-* LED GND returns directly to battery/protection GND
-* Logic GND returns separately to the same point
+### 4.2 IMU
 
-Do **not** daisy-chain logic ground through the LED ground path.
+* **LSM6DSR breakout** with:
 
----
+  * 0.1" header holes
+  * SPI pins clearly labeled
+  * 3.3V supply supported (ideal is “no onboard level shifting needed”)
 
-## 5) Required passives and “stability kit”
+### 4.3 Battery charger + protection (single visible USB)
 
-### 5.1 LED rail components (at the strip input)
+Use a **known-good 1S Li-ion charger module with protection** (USB-C or micro-USB). Requirements:
 
-* **Bulk capacitor:** **1000 µF** (470 µF minimum) across LED + / GND at the strip input
-* **Data series resistor:** **330 Ω** (acceptable range 220–470 Ω) in series with LED_DATA near the Pico
+* Charges 1S Li-ion safely
+* Includes **undervoltage cutoff** and short protection (or separate protection board)
+* Has a USB connector you can align to a tube window
 
-These two components prevent 90% of “random flicker / reset” issues.
+**Important:** This is the **only external USB**.
 
-### 5.2 Logic rail decoupling
+### 4.4 3.3V regulator
 
-* At Pico 3.3 V input: **10–22 µF + 0.1 µF**
-* At IMU breakout: **10 µF + 0.1 µF**
+Use a **buck/boost** module (not LDO) so the Pico is stable down near empty battery:
 
-### 5.3 Optional but useful
+* Vin down to ~2.7–3.0 V
+* 3.3 V out
+* ≥300 mA continuous
 
-* **LED power injection at far end** (VBAT and GND) if brightness drops along the strip.
-
----
-
-## 6) WS2812 data-level reliability (important decision)
-
-Because you’re powering LEDs from **VBAT up to 4.2 V** and the Pico outputs **3.3 V**, most WS2812 strips will still work, but some batches are picky.
-
-### Baseline plan (keep it simple)
-
-* No level shifter initially.
-* Keep LED_DATA wire short.
-* Use the 330 Ω series resistor + strong ground.
-
-### If you see flicker/corruption (especially right after charging at 4.2 V)
-
-Pick one of these *hardware* mitigations:
-
-**Mitigation A (still simple): drop LED V+ slightly**
-
-* Add a **Schottky diode** in series with LED V+ to shave ~0.2–0.3 V at typical currents.
-* This increases your logic margin without adding a new rail.
-
-**Mitigation B (most robust): add a tiny “data-only 5 V” rail**
-
-* Add a small boost set to **5 V** powering only a **single-gate buffer** (not the LED strip).
-* Use a proper WS2812 buffer (AHCT-style) at 5 V.
-* This adds parts, but still avoids a high-current 5 V LED rail.
-
-Documenting this up front keeps you from getting stuck later.
+Choose a module with **through-hole pins / large pads** and a low profile.
 
 ---
 
-## 7) Brightness and current constraints (hardware-informed)
+## 5) LED subsystem details
 
-### LED current reality
+### 5.1 LED strip
 
-* WS2812 worst case: 36 × 60 mA = **2.16 A** (don’t run this)
-* We will enforce firmware limits: **~20–25% global brightness** typical.
+* WS2812 strip cut to **36 LEDs**
+* Place at least one **power injection** at the near end (closest to sled)
 
-### Consequences of single-cell
+If brightness gradient appears, inject power at the far end too:
 
-* **Runtime**: typically ~30–60 minutes depending on patterns and your specific cell capacity.
-* **Brightness**: plenty bright in a diffuser at night, but not “max brightness floodlight.”
-* **Reliability**: higher, because fewer battery failure modes.
+* VBAT and GND to far end pads (still one cell; just reducing voltage drop).
+
+### 5.2 Required “stability kit” (non-negotiable)
+
+At the LED strip input (near the sled):
+
+* **1000 µF electrolytic** across LED V+ / GND
+* **330 Ω series resistor** on LED data line near Pico output
+
+These reduce sag and ringing that cause flicker or resets.
 
 ---
 
-## 8) Mechanical plan (hardware-driven)
+## 6) Data level considerations (3.3V Pico → WS2812 at VBAT)
 
-### Body
+Baseline approach:
 
-* Polycarbonate tube (diffused) about 2 ft
-* Foam end caps for impact
+* Drive WS2812 data directly from Pico (3.3 V)
+* Keep data wire short and referenced to the same ground
+* Use series resistor
 
-### Internal layout
+**If you see corruption (especially at fresh charge 4.2 V):**
+Hardware mitigation path (in order of simplicity):
 
-* LED strip along the tube
-* **Battery + Pico + power modules near the center**
-* Strain relief on:
+1. **Schottky diode in LED V+** to drop LED rail slightly (improves logic margin)
+2. Add **74AHCT** buffer powered from LED V+ (most robust, still small)
 
-  * LED strip solder joints
+We won’t add these unless needed.
+
+---
+
+## 7) Concrete pin plan (Pico)
+
+### WS2812 (PIO)
+
+* LED_DATA: **GP0** (or any convenient GPIO)
+
+### SPI to LSM6DSR (SPI0 suggested)
+
+* SCK:  **GP18**
+* MOSI: **GP19**
+* MISO: **GP16**
+* CS:   **GP17** (GPIO)
+
+### IMU interrupt (optional, recommended)
+
+* INT1: **GP20** (any GPIO)
+
+### Optional battery sense (future-proof)
+
+* VBAT_SENSE: **GP26 / ADC0** via divider (can be unpopulated in v1)
+
+---
+
+## 8) Physical placement inside 30 mm ID
+
+### Recommended orientation
+
+Place everything “flat” on the sled so the thickness stays low:
+
+* **Pico** mounted flat
+* **Charger module** mounted flat with USB connector facing outward to the tube window
+* **Buck/boost** mounted flat
+* **Bulk capacitor** laid **sideways** if height is tight (or choose a shorter can)
+
+### Tube window (charging)
+
+* One rectangular cutout aligned with **charger USB**
+* Add a small **bezel** (3D print or epoxy-formed) so plug forces push into the tube, not into the PCB solder joints.
+
+### Service access for programming
+
+* One endcap is removable
+* Sled can slide out for Pico USB access
+
+---
+
+## 9) Wiring rules for baton survivability
+
+* No Dupont jumpers.
+* Use soldered joints + heatshrink.
+* Add strain relief where wires meet:
+
+  * LED strip pads
   * battery leads
-  * module-to-module wiring
-
-### Service access
-
-* One end cap removable for:
-
-  * USB charging access
-  * firmware USB access
-  * battery inspection/replacement
+  * module pads
+* Immobilize wires to the sled (zip tie anchors or adhesive) so solder joints aren’t load-bearing.
 
 ---
 
-## 9) Final BOM checklist (buildable by hand)
+## 10) Bring-up tests (hardware before software)
 
-**Core**
+1. **Power test**
 
-* Raspberry Pi Pico + headers
-* LSM6DSR breakout w/ 0.1" header holes
-* WS2812 strip cut to 36 LEDs
+* Charger charges battery.
+* Protection behaves (no weird heat).
+* 3.3 V rail is stable across battery range.
 
-**Power**
+2. **LED test (low brightness)**
 
-* 1S Li-ion USB charger module **with protection**
-* 3.3 V **buck/boost** regulator module (hand solderable)
-* Physical power switch (latching)
+* Confirm no resets/flicker when patterns change quickly.
+* Confirm bulk cap and data resistor are installed.
 
-**Passives**
+3. **IMU SPI test**
 
-* 1000 µF electrolytic (LED rail)
-* 10–22 µF ceramic + 0.1 µF ceramic (logic rail)
-* 10 µF + 0.1 µF (IMU rail)
-* 330 Ω resistor (LED data)
+* Read WHOAMI.
+* Stream accel/gyro at target rate.
 
-**Wiring/mech**
+4. **Shake test**
 
-* Thicker wire for LED VBAT/GND
-* Perfboard or small carrier board
-* Heatshrink, silicone/epoxy for strain relief
+* No intermittent power/data issues under vibration.
 
----
-
-## 10) Hardware bring-up tests (before software features)
-
-1. **Power sanity**
-
-* Verify 3.3 V rail holds steady across battery range (fresh charge to near-empty).
-* Confirm power switch cuts everything.
-
-2. **WS2812 smoke test**
-
-* Run a low-brightness rainbow/chase (cap brightness in code immediately).
-* Confirm no resets when patterns change quickly.
-
-3. **SPI IMU test**
-
-* Read WHOAMI/registers reliably.
-* Stream gyro/accel at your target ODR.
-
-4. **Combined stress**
-
-* Worst-case animation transitions at your brightness cap.
-* Shake test (vibration) before any throws.
+Only after this do you start throwing.
