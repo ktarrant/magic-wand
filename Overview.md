@@ -1,255 +1,303 @@
-Perfect — **one visible USB (charging only)** is the cleanest/strongest baton mechanically, and it keeps the electrical design dead simple.
+# Hardware Design Document v3.0
 
-Here’s the **hardware-locked update** of the design doc with that decision baked in, including a concrete mid-body layout for **30 mm ID** (and an easy fallback to 38 mm).
+## Throwable Motion-Reactive LED Baton (Prototype)
 
----
-
-# Hardware Design Document v2.1
-
-## RP2040 + LSM6DSR (SPI) + 36× WS2812
-
-### Single visible USB for charging (programming requires opening baton)
-
-## 1) Summary
-
-A 2-ft throwable LED baton using:
-
-* **Raspberry Pi Pico (RP2040)** for control + WS2812 via **PIO**
-* **LSM6DSR** IMU on **SPI**
-* **36× WS2812** LEDs on a strip inside a diffused tube
-* **Single 1S vape Li-ion cell** with **known 1S charger+protection module**
-* Only external port: **charger USB**
-* Pico USB is internal; open baton to reflash
-
-Primary design priorities:
-
-* **Battery safety & simplicity**
-* **No random resets** from LED current spikes
-* **Mechanical robustness** for throwing
-* **Hand-solderable modules** (through-hole headers / large pads)
+**Tube:** 38 mm inner diameter (ID), diffused polycarbonate
+**MCU:** RP2040 (Raspberry Pi Pico)
+**IMU:** ST LSM6DSR (SPI) breakout
+**LEDs:** 36× WS2812 (strip)
+**Battery:** Single salvaged 1S vape Li-ion cell
+**External UI:** One central cluster: **USB-C charging**, **power switch**, **mode button**, **charge indicator LEDs**
+**Charging behavior:** Baton **must be OFF** while charging (no LED array indication during charging)
 
 ---
 
-## 2) Mechanical envelope and layout
+## 1) Requirements and decisions
 
-### Tube size targets
+### Locked decisions
 
-* **Ideal:** 30 mm inner diameter (ID)
-* **Easy mode:** 38 mm ID (more padding, easier module selection)
+* **One external USB port**: USB-C for charging only
+* **Programming**: open baton to access Pico USB internally
+* **Battery**: single 1S cell only (no parallel/series packs)
+* **Off while charging**: enforced by user behavior + design assumption
+* **Control cluster** in grip area includes:
 
-30 mm works if we keep the middle package low-profile and avoid tall stacks.
-
-### Overall physical layout
-
-* **LED strip** runs nearly full length
-* **Electronics “center sled”** located at the baton midpoint (center of mass)
-* **Single charging USB window** on the tube at the center (grip area)
-* Ends are sealed with foam end caps; electronics are not at the ends
-
-### Center sled concept (recommended)
-
-A rigid internal carrier ~**140–180 mm long** that holds:
-
-* battery (centered)
-* charger/protection module (USB aligned to window)
-* 3.3 V buck/boost module
-* Pico (internal-only USB)
-* IMU breakout
-* bulk capacitor + series resistor
-
-**Sled materials (pick one):**
-
-* 3D printed sled (best packaging control)
-* FR4 strip / acrylic strip (simple, stiff)
-* perfboard only as a mounting plate (avoid tall component stacks)
-
-**Retention:** foam cradle + 2–3 zip ties or screws → sled cannot rattle.
+  * USB-C port (charger module)
+  * latching power switch
+  * mode button (momentary)
+  * charge status indicator light(s) (from charger module)
 
 ---
 
-## 3) Electrical architecture
+## 2) System architecture
 
-### 3.1 Rails
+### Electrical block diagram
 
-* **VBAT (protected):** battery voltage after protection, ~3.0–4.2 V
+```
+USB-C (charging) → 1S Charger+Protection → OUT+ → [Power Switch] → VBAT_STAR
+                                                        |
+                                                        +→ LED rail (VBAT) → WS2812 strip
+                                                        |
+                                                        +→ 3.3V buck/boost → Pico + LSM6DSR
+```
 
-  * Powers WS2812 strip directly
-  * Feeds buck/boost regulator
-* **3.3 V:** regulated logic rail for Pico + IMU
+### Key design principles
 
-### 3.2 Star power topology (must-follow)
+* **Two rails**:
 
-At the **protected battery output**, create a star point:
-
-* Branch A: **VBAT → LED strip V+**
-* Branch B: **VBAT → 3.3V buck/boost → Pico + IMU**
-
-Ground returns also star back to the same point:
-
-* LED ground return does **not** share thin traces/wires with logic ground.
-
-This is your main defense against resets/flicker.
+  * LED rail = **VBAT** (3.0–4.2 V)
+  * Logic rail = **3.3 V** from buck/boost
+* **Star power routing** at VBAT_STAR to prevent LED current spikes from resetting logic
 
 ---
 
-## 4) Modules and parts (hand-solderable)
+## 3) Mechanical design
 
-### 4.1 MCU
+### Tube
 
-* **Raspberry Pi Pico**
+* 38 mm ID gives comfortable clearance for:
 
-  * Solder on 0.1" headers (through-hole)
-  * Mount flat to sled (minimize flex)
+  * low-profile sled
+  * foam shock mounting
+  * tidy wire routing
+  * a robust central “bezel” for the control cluster
 
-### 4.2 IMU
+### Central control cluster (“bezel”)
 
-* **LSM6DSR breakout** with:
+A reinforced mid-body area (where your hand goes) with:
 
-  * 0.1" header holes
-  * SPI pins clearly labeled
-  * 3.3V supply supported (ideal is “no onboard level shifting needed”)
+1. **USB-C receptacle opening** (charger board)
+2. **Power switch opening** (recessed)
+3. **Mode button opening** (plunger or silicone boot)
+4. **Indicator window(s)** aligned to charger board LEDs (CHRG/DONE)
 
-### 4.3 Battery charger + protection (single visible USB)
+**Bezel goals**
 
-Use a **known-good 1S Li-ion charger module with protection** (USB-C or micro-USB). Requirements:
+* Take insertion forces from USB plug without stressing PCB solder joints
+* Prevent accidental switch toggles
+* Provide water/dust resistance (optional later)
 
-* Charges 1S Li-ion safely
-* Includes **undervoltage cutoff** and short protection (or separate protection board)
-* Has a USB connector you can align to a tube window
+### Center sled
 
-**Important:** This is the **only external USB**.
+A rigid internal carrier ~150–200 mm long holding all electronics.
+Recommended materials:
 
-### 4.4 3.3V regulator
+* 3D printed sled (best)
+* FR4 strip / acrylic strip (good)
+* Perfboard only as a mounting base (avoid tall stacks)
 
-Use a **buck/boost** module (not LDO) so the Pico is stable down near empty battery:
+**Retention**
 
-* Vin down to ~2.7–3.0 V
-* 3.3 V out
+* Foam wrap + zip ties/screws so the sled cannot rattle
+
+### Component placement (centered)
+
+* Battery located at the **center of mass**
+* Charger board placed so its USB-C aligns to the bezel
+* Pico + buck/boost + IMU adjacent, all on the sled
+* Bulk capacitor near the LED power branch
+
+---
+
+## 4) Electrical design details
+
+## 4.1 Battery subsystem
+
+* Single 1S cell salvaged from vape (3.0–4.2 V)
+* Use a **known charger+protection module** with:
+
+  * USB-C input
+  * charge status LED(s) onboard
+  * protection for undervoltage/overcurrent/short
+
+**Critical requirement:** Protected output (OUT+/OUT−) is preferred.
+
+---
+
+## 4.2 Power switching (hard OFF)
+
+### Component
+
+* **Latching slide switch** (SPST) recommended, small, recessed
+
+### Wiring
+
+* Charger/protection **OUT+ → switch → VBAT_STAR**
+* Charger/protection **OUT− → GND_STAR** (do not switch ground)
+
+This ensures:
+
+* zero parasitic drain when off
+* charging state indication remains visible (charger LEDs)
+* predictable behavior: OFF means everything is off
+
+---
+
+## 4.3 3.3 V logic rail
+
+### Regulator type
+
+* **Buck/boost 3.3 V** (not LDO)
+
+### Requirements
+
+* Input: down to ~2.7–3.0 V
+* Output: 3.3 V
 * ≥300 mA continuous
+* Module with large pads / through-hole pins
 
-Choose a module with **through-hole pins / large pads** and a low profile.
+### Decoupling
 
----
-
-## 5) LED subsystem details
-
-### 5.1 LED strip
-
-* WS2812 strip cut to **36 LEDs**
-* Place at least one **power injection** at the near end (closest to sled)
-
-If brightness gradient appears, inject power at the far end too:
-
-* VBAT and GND to far end pads (still one cell; just reducing voltage drop).
-
-### 5.2 Required “stability kit” (non-negotiable)
-
-At the LED strip input (near the sled):
-
-* **1000 µF electrolytic** across LED V+ / GND
-* **330 Ω series resistor** on LED data line near Pico output
-
-These reduce sag and ringing that cause flicker or resets.
+* At regulator output near Pico: **10–22 µF + 0.1 µF**
+* At IMU: **10 µF + 0.1 µF**
 
 ---
 
-## 6) Data level considerations (3.3V Pico → WS2812 at VBAT)
+## 4.4 LED subsystem (VBAT rail)
 
-Baseline approach:
+* WS2812 V+ tied to **VBAT_STAR**
+* WS2812 GND tied to **GND_STAR**
 
-* Drive WS2812 data directly from Pico (3.3 V)
-* Keep data wire short and referenced to the same ground
-* Use series resistor
+### Mandatory stability parts
 
-**If you see corruption (especially at fresh charge 4.2 V):**
-Hardware mitigation path (in order of simplicity):
+At the LED strip input (closest to the sled):
 
-1. **Schottky diode in LED V+** to drop LED rail slightly (improves logic margin)
-2. Add **74AHCT** buffer powered from LED V+ (most robust, still small)
+* **1000 µF electrolytic** across LED V+/GND
+* **330 Ω series resistor** on LED_DATA near Pico output
 
-We won’t add these unless needed.
+### Power injection
 
----
-
-## 7) Concrete pin plan (Pico)
-
-### WS2812 (PIO)
-
-* LED_DATA: **GP0** (or any convenient GPIO)
-
-### SPI to LSM6DSR (SPI0 suggested)
-
-* SCK:  **GP18**
-* MOSI: **GP19**
-* MISO: **GP16**
-* CS:   **GP17** (GPIO)
-
-### IMU interrupt (optional, recommended)
-
-* INT1: **GP20** (any GPIO)
-
-### Optional battery sense (future-proof)
-
-* VBAT_SENSE: **GP26 / ADC0** via divider (can be unpopulated in v1)
+* Inject at start.
+* If you see voltage drop/gradient, inject VBAT/GND at the far end too.
 
 ---
 
-## 8) Physical placement inside 30 mm ID
+## 4.5 WS2812 data voltage margin
 
-### Recommended orientation
+Baseline: direct Pico 3.3 V data, short wire, good ground, series resistor.
 
-Place everything “flat” on the sled so the thickness stays low:
+If corruption occurs (esp. at 4.2 V battery):
 
-* **Pico** mounted flat
-* **Charger module** mounted flat with USB connector facing outward to the tube window
-* **Buck/boost** mounted flat
-* **Bulk capacitor** laid **sideways** if height is tight (or choose a shorter can)
+* Add a **Schottky diode** in series with LED V+ *or*
+* Add a **74AHCT buffer** powered from LED V+ (most robust)
 
-### Tube window (charging)
-
-* One rectangular cutout aligned with **charger USB**
-* Add a small **bezel** (3D print or epoxy-formed) so plug forces push into the tube, not into the PCB solder joints.
-
-### Service access for programming
-
-* One endcap is removable
-* Sled can slide out for Pico USB access
+Not required for v1 unless you see issues.
 
 ---
 
-## 9) Wiring rules for baton survivability
+## 5) MCU + IMU interface
 
-* No Dupont jumpers.
-* Use soldered joints + heatshrink.
-* Add strain relief where wires meet:
+### Pico mounting
 
-  * LED strip pads
-  * battery leads
-  * module pads
-* Immobilize wires to the sled (zip tie anchors or adhesive) so solder joints aren’t load-bearing.
+* Pico with through-hole headers soldered
+* Mount flat to sled, with strain relief on all wires
+
+### SPI pin plan (suggested)
+
+* WS2812 data (PIO): **GP0**
+* SPI0:
+
+  * SCK:  **GP18**
+  * MOSI: **GP19**
+  * MISO: **GP16**
+  * CS:   **GP17**
+* Optional IMU interrupt: **GP20**
+* Optional battery sense: **GP26/ADC0** (divider footprint can be left unpopulated)
+
+### IMU mounting orientation
+
+* Mount the IMU breakout rigidly to sled (no flex)
+* Document axis orientation for software (label X/Y/Z relative to baton)
 
 ---
 
-## 10) Bring-up tests (hardware before software)
+## 6) User interface behavior
 
-1. **Power test**
+### Power switch
 
-* Charger charges battery.
-* Protection behaves (no weird heat).
-* 3.3 V rail is stable across battery range.
+* OFF: device fully off
+* ON: device runs normally
 
-2. **LED test (low brightness)**
+### Mode button
 
-* Confirm no resets/flicker when patterns change quickly.
-* Confirm bulk cap and data resistor are installed.
+* Short press: cycle lighting mode
+* Long press (optional): brightness step or “lock” mode
 
-3. **IMU SPI test**
+### Charge indication
 
-* Read WHOAMI.
-* Stream accel/gyro at target rate.
+* Provided solely by charger module LEDs:
 
-4. **Shake test**
+  * Charging: CHRG LED
+  * Full: DONE LED
+* Baton must be OFF while charging (no LED array output during charge)
 
-* No intermittent power/data issues under vibration.
+---
 
-Only after this do you start throwing.
+## 7) BOM (prototype-ready categories)
+
+**Core**
+
+* Raspberry Pi Pico + 0.1" headers
+* LSM6DSR SPI breakout (0.1" headers)
+* WS2812 strip cut to 36 LEDs
+
+**Power**
+
+* 1S Li-ion USB-C charger+protection module with onboard status LED(s)
+* 3.3 V buck/boost module (hand solderable)
+* SPST latching slide switch (panel/recess mount style)
+
+**UI**
+
+* Momentary tactile switch (on sled) + external actuator:
+
+  * silicone boot or printed plunger
+
+**Passives**
+
+* 1000 µF electrolytic (LED rail bulk)
+* 10–22 µF ceramic + 0.1 µF ceramic (logic rail)
+* 10 µF + 0.1 µF (IMU rail)
+* 330 Ω resistor (LED data series)
+
+**Mechanical**
+
+* 38 mm ID diffused tube
+* foam end caps
+* foam wrap/padding for sled
+* bezel/lightpipe material (3D print or epoxy + translucent insert)
+
+---
+
+## 8) Hardware bring-up checklist (before “real” throwing)
+
+1. **Charger + protection**
+
+* Plug USB-C in: CHRG LED lights
+* Battery reaches full: DONE LED
+* No overheating
+
+2. **Power switch**
+
+* OFF: no current draw to system
+* ON: stable VBAT_STAR and 3.3 V rail
+
+3. **LED test at low brightness**
+
+* No flicker, no resets during rapid pattern changes
+* Bulk cap installed and close to strip input
+
+4. **SPI IMU test**
+
+* WHOAMI reads reliably
+* Streaming accel/gyro at target ODR works
+
+5. **Shake test**
+
+* No intermittent power/data
+* No rattles
+
+6. **Soft drop test**
+
+* On carpet/foam first
+* Re-check solder joints and connectors
